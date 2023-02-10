@@ -1,0 +1,50 @@
+{% extends "bootstrap/base.html" %}
+
+{% block title %}
+    VlookUp
+{% endblock %}
+
+{% block scripts %}
+
+{% endblock %}
+
+{% block navbar %}
+<nav class="navbar navbar-default">
+    <div class="container-fluid">
+      <a class="navbar-brand" href="{{ url_for('index') }}">VlookUp</a>
+      <div class="collapse navbar-collapse">
+        <ul class="nav navbar-nav">
+          {% if current_user.is_authenticated %}
+            <li><a class="" href="{{ url_for('logout') }}">Logout</a></li>
+          {% else %}
+            <li><a class="" href="{{ url_for('login') }}">Login</a></li>
+          {% endif %}
+        </ul>
+      </div>
+    </div>
+</nav>
+{% endblock %}
+
+{% block content %}
+    <script src="https://code.jquery.com/jquery-3.6.3.min.js"></script>
+    <script>
+        function hide_message() {
+            $('#message').fadeOut(4000);
+        }
+    </script>
+    <div class="container mt-3">
+        {% with messages = get_flashed_messages() %}
+        {% if messages %}
+            {% for message in messages %}
+            <div class="alert alert-dismissible alert-warning" role="alert" id="message">
+                {{ message }}
+                <script type="text/javascript">
+                   hide_message();
+                </script>
+            </div>
+            {% endfor %}
+            {% endif %}
+        {% endwith %}
+        {% block app_content %}{% endblock %}
+    </div>
+{% endblock %}
