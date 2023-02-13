@@ -6,7 +6,7 @@ from . import app
 import pandas as pd
 
 from flask import render_template, flash, redirect, url_for, request
-from flask_login import login_user, logout_user, login_required
+from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.urls import url_parse
 
 from app.forms import *
@@ -44,8 +44,8 @@ provider_config = {1: {'skiprows': 6,
                    }
 
 
-def replace_rtp(rtp):
-    result = str(rtp).strip()
+def replace_rtp(rtp_string):
+    result = str(rtp_string).strip()
     replace_chars = '?%@#$^&*() '
     for ch in replace_chars:
         result = result.replace(ch, '')
@@ -62,6 +62,43 @@ def replace_rtp(rtp):
         result = list(map(lambda x: x * 100 if x < 1 else x, result))
         return {'mode': 'range',
                 'data': result}
+
+
+def create_rtp(game_obj, rtp_string, commit_mode=False, delete_mode=True):
+    game = game_obj
+    if rtp_string:
+        if delete_mode:
+            for game_rtp in game.rtp:
+                rtp_id = RTP.query.get(game_rtp.id)
+                db.session.delete(rtp_id)
+            db.session.flush()
+        list_rtp = replace_rtp(rtp_string)
+        if len(list_rtp.get('data')) > 1:
+            if list_rtp.get('mode') == 'range':
+                rtp_min = list_rtp.get('data')[0]
+                rtp_max = list_rtp.get('data')[1]
+                rtp = RTP(game_id=game.id,
+                          min=rtp_min,
+                          max=rtp_max)
+                db.session.add(rtp)
+            elif list_rtp.get('mode') == 'list':
+                for r in list_rtp.get('data'):
+                    rtp_min = rtp_max = r
+                    rtp = RTP(game_id=game.id,
+                              min=rtp_min,
+                              max=rtp_max)
+                    db.session.add(rtp)
+        else:
+            if list_rtp.get('data'):
+                rtp_min = rtp_max = list_rtp.get('data')[0]
+                rtp = RTP(game_id=game.id,
+                          min=rtp_min,
+                          max=rtp_max)
+                db.session.add(rtp)
+        if commit_mode:
+            db.session.commit()
+        else:
+            db.session.flush()
 
 
 @app.route('/login/', methods=['GET', 'POST'])
@@ -102,38 +139,33 @@ def index():
                            pagination=items)
 
 
-def get_statuses():
-    return [(s.id, s.name) for s in Status.query.order_by(
-        Status.name.asc()).all()]
-
-
-def get_providers():
-    return [(p.id, p.name) for p in Provider.query.order_by(
-        Provider.id.asc()).all()]
-
-
-def get_types():
-    return [(t.id, t.name) for t in GameType.query.order_by(
-        GameType.name.asc()).all()]
-
-
 @app.route('/games/create', methods=['GET', 'POST'])
 @login_required
 def game_create():
     form = GameForm()
-    form.status.choices = get_statuses()
-    form.provider.choices = get_providers()
-    form.type.choices = get_types()
+    form.status.choices = Status.get_items()
+    form.provider.choices = Provider.get_items()
+    form.type.choices = GameType.get_items()
     if form.validate_on_submit():
-        print(form.type.data)
+        type_id = form.type.data
+        new_type_name = form.type_new.data
+        if new_type_name:
+            game_type = GameType.query.filter_by(name=new_type_name).first()
+            if not game_type:
+                game_type = GameType(name=new_type_name)
+                db.session.add(game_type)
+                db.session.flush()
+            type_id = game_type.id
         game = Game(provider_id=form.provider.data,
                     name=form.name.data,
-                    type_id=form.type.data,
+                    type_id=type_id,
                     table_id=form.table_id.data,
                     features=form.features.data,
                     rollout_date=form.rollout_date.data,
                     status_id=form.status.data)
         db.session.add(game)
+        db.session.flush()
+        create_rtp(game, form.rtp.data)
         db.session.commit()
         return redirect(url_for('index'))
     return render_template('data_form.html', form=form)
@@ -144,13 +176,23 @@ def game_create():
 def game_edit(id):
     game = Game.query.get_or_404(id)
     form = GameForm()
-    form.status.choices = get_statuses()
-    form.provider.choices = get_providers()
-    form.type.choices = get_types()
+    form.status.choices = Status.get_items()
+    form.provider.choices = Provider.get_items()
+    form.type.choices = GameType.get_items()
+    form.rtp.render_kw = {'disabled': True}
     if form.validate_on_submit():
+        type_id = form.type.data
+        new_type_name = form.type_new.data
+        if new_type_name:
+            game_type = GameType.query.filter_by(name=new_type_name).first()
+            if not game_type:
+                game_type = GameType(name=new_type_name)
+                db.session.add(game_type)
+                db.session.flush()
+            type_id = game_type.id
         game.provider_id = form.provider.data
         game.name = form.name.data
-        game.type_id = form.type.data
+        game.type_id = type_id
         game.table_id = form.table_id.data
         game.features = form.features.data
         game.rollout_date = form.rollout_date.data
@@ -167,6 +209,7 @@ def game_edit(id):
         form.table_id.data = game.table_id
         form.features.data = game.features
         form.rollout_date.data = game.rollout_date
+        form.rtp.data = game.get_rtp()
     return render_template('data_form.html', form=form)
 
 
@@ -183,7 +226,7 @@ def game_delete(id):
 @login_required
 def import_excel():
     form = ImportForm()
-    form.provider.choices = get_providers()
+    form.provider.choices = Provider.get_items()
     if form.validate_on_submit():
         mode = form.mode.data
         provider_id = form.provider.data
